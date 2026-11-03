@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # Main Title
-st.title("🔬 Metal LPBF Literature Database & Process ML Simulator")
+st.title("🔬 Metal LPBF Literature Database & ML Simulator")
 st.markdown(
     "A research-focused MVP integrating curated literature data (600+ samples)"
     " with machine learning-driven process parameter prediction."
