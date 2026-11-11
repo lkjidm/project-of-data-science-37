@@ -25,7 +25,26 @@ def load_literature_data():
   # Load the curated dataset
   csv_path = "data/raw_papers.csv"
   if os.path.exists(csv_path):
-    return pd.read_csv(csv_path)
+    data = pd.read_csv(csv_path)
+
+    column_map = {
+        "No.": "publication_id",
+        "Material": "material_name",
+        "Laser Power (W)": "laser_power_w",
+        "Scan Speed (mm/s)": "scan_speed_mm_s",
+        "Hatch space (mm)": "hatch_distance_mm",
+        "Layer thickness (mm)": "layer_thickness_mm",
+        "Energy density (J/mm³)": "ved_j_mm3",
+        "Porosity in vol%": "porosity_pct",
+        "Microhadness (HV)": "microhardness_hv",
+        "Spot size (mm)": "spot_size_mm",
+        "Hatch Angle(degree)": "hatch_angle_deg",
+        "Exposure time in µs": "exposure_time_us",
+    }
+
+    data = data.rename(columns=column_map)
+
+    return data
   else:
     # Fallback mock data if csv is not yet created, ensuring app runs smoothly
     return pd.DataFrame({
@@ -49,8 +68,10 @@ st.sidebar.header("🎛️ Control Panel")
 
 # Section A: Global Literature Filters
 st.sidebar.subheader("1. Literature Filter")
+available_materials = sorted(df["material_name"].dropna().unique())
+
 selected_material = st.sidebar.selectbox(
-    "Alloy Type", ["All", "Ti-6Al-4V", "AlSi10Mg"]
+    "Alloy Type", ["All"] + available_materials
 )
 
 # Filter dataframe based on alloy selection
@@ -60,19 +81,77 @@ if selected_material != "All":
 
 # Section B: Process Parameter Simulator (ML Input)
 st.sidebar.subheader("2. Target Process Simulator")
-sim_power = st.sidebar.slider(
-    "Laser Power P (W)", min_value=100, max_value=500, value=300, step=10
-)
-sim_speed = st.sidebar.slider(
-    "Scan Speed v (mm/s)", min_value=200, max_value=2000, value=1000, step=50
-)
-sim_hatch = st.sidebar.number_input(
-    "Hatch Distance h (mm)", value=0.10, step=0.01, format="%.2f"
-)
-sim_layer = st.sidebar.number_input(
-    "Layer Thickness t (mm)", value=0.03, step=0.005, format="%.3f"
+
+# Select material for the simulator
+sim_material = st.sidebar.selectbox(
+    "Simulator Alloy", available_materials
 )
 
+# Get literature records for the selected material
+material_data = df[df["material_name"] == sim_material]
+
+# Calculate default values using the median of the dataset
+default_power = material_data["laser_power_w"].median()
+default_speed = material_data["scan_speed_mm_s"].median()
+default_hatch = material_data["hatch_distance_mm"].median()
+default_layer = material_data["layer_thickness_mm"].median()
+default_spot = material_data["spot_size_mm"].median()
+
+# Add a reset button
+if st.sidebar.button("Reset to default values"):
+    st.session_state["sim_power"] = float(default_power)
+    st.session_state["sim_speed"] = float(default_speed)
+    st.session_state["sim_hatch"] = float(default_hatch)
+    st.session_state["sim_layer"] = float(default_layer)
+    st.session_state["sim_spot"] = float(default_spot)
+
+# Simulator inputs
+sim_power = st.sidebar.slider(
+    "Laser Power P (W)",
+    min_value=30.0,
+    max_value=500.0,
+    value=float(default_power),
+    step=1.0,
+    key="sim_power"
+)
+
+sim_speed = st.sidebar.slider(
+    "Scan Speed v (mm/s)",
+    min_value=100.0,
+    max_value=3500.0,
+    value=float(default_speed),
+    step=1.0,
+    key="sim_speed"
+)
+
+sim_hatch = st.sidebar.number_input(
+    "Hatch Distance h (mm)",
+    min_value=0.001,
+    max_value=1.0,
+    value=float(default_hatch),
+    step=0.001,
+    format="%.3f",
+    key="sim_hatch"
+)
+
+sim_layer = st.sidebar.number_input(
+    "Layer Thickness t (mm)",
+    min_value=0.001,
+    max_value=1.0,
+    value=float(default_layer),
+    step=0.001,
+    format="%.3f",
+    key="sim_layer"
+)
+sim_spot = st.sidebar.number_input(
+    "Laser Spot Size (mm)",
+    min_value=0.001,
+    max_value=1.0,
+    value=float(default_spot),
+    step=0.001,
+    format="%.3f",
+    key="sim_spot"
+)
 # Automatically calculate Volume Energy Density (VED) for simulation target
 sim_ved = sim_power / (sim_speed * sim_hatch * sim_layer)
 
@@ -100,10 +179,11 @@ except Exception:
   )
 
 # 5. Main Workspace Tabs
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "📈 Interactive Dashboard & ML Prediction",
     "🔍 Literature Data Explorer",
     "🗺️ Process Window View",
+    "📊 Material Comparison",
 ])
 
 with tab1:
@@ -126,7 +206,7 @@ with tab1:
       delta_color="inverse",
   )
 
-  col3.metric(label="Selected Alloy Profile", value=selected_material)
+  col3.metric(label="Selected Alloy Profile", value=sim_material)
 
   st.markdown("---")
 
@@ -209,3 +289,89 @@ with tab3:
         "Insufficient data points in current filter to generate contour"
         " mapping."
     )
+
+# 6. Material Comparison & Statistical Analysis
+with tab4:
+    st.subheader("Material Comparison & Statistical Analysis")
+
+    st.markdown(
+        "Compare the manufacturing parameters of 316L and 18Ni300 "
+        "using descriptive statistics from the literature dataset."
+    )
+
+    comparison_columns = [
+        "laser_power_w",
+        "scan_speed_mm_s",
+        "hatch_distance_mm",
+        "layer_thickness_mm",
+        "spot_size_mm",
+        "ved_j_mm3",
+    ]
+
+    # Create a copy to avoid modifying the original dataset
+    comparison_df = df.copy()
+
+    # Ensure all comparison variables are numeric
+    for column in comparison_columns:
+        comparison_df[column] = pd.to_numeric(
+            comparison_df[column], errors="coerce"
+        )
+
+    # Calculate descriptive statistics for each material
+    comparison_stats = comparison_df.groupby("material_name")[
+        comparison_columns
+    ].agg(["count", "mean", "median", "std", "min", "max"])
+
+    comparison_stats = comparison_stats.round(3)
+
+    st.markdown("### Descriptive Statistics")
+
+    st.markdown(
+        "The table below shows the distribution of each manufacturing "
+        "parameter across the two materials."
+    )
+
+    st.dataframe(
+        comparison_stats,
+        use_container_width=True
+    )
+    st.markdown("---")
+    st.markdown("### Interactive Parameter Comparison")
+
+    # Select manufacturing parameter
+    parameter_labels = {
+        "laser_power_w": "Laser Power (W)",
+        "scan_speed_mm_s": "Scan Speed (mm/s)",
+        "hatch_distance_mm": "Hatch Distance (mm)",
+        "layer_thickness_mm": "Layer Thickness (mm)",
+        "spot_size_mm": "Spot Size (mm)",
+        "ved_j_mm3": "Volume Energy Density (J/mm³)",
+    }
+
+    selected_parameter = st.selectbox(
+        "Select parameter to compare",
+        options=list(parameter_labels.keys()),
+        format_func=lambda x: parameter_labels[x],
+    )
+
+    # Create box plot
+    fig_box = px.box(
+        comparison_df,
+        x="material_name",
+        y=selected_parameter,
+        color="material_name",
+        points="all",
+        title=f"{parameter_labels[selected_parameter]}: 316L vs 18Ni300",
+        labels={
+            "material_name": "Material",
+            selected_parameter: parameter_labels[selected_parameter],
+        },
+    )
+
+    fig_box.update_layout(
+        height=500,
+        template="plotly_white",
+        showlegend=False,
+    )
+
+    st.plotly_chart(fig_box, use_container_width=True)
