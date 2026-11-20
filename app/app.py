@@ -3,6 +3,8 @@ import joblib
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from pathlib import Path
+import re
 
 # 1. Page Configuration & Layout Setup
 st.set_page_config(
@@ -23,23 +25,31 @@ st.markdown(
 @st.cache_data
 def load_literature_data():
   # Load the curated dataset
-  csv_path = "data/raw_papers.csv"
+  BASE_DIR = Path(__file__).resolve().parent.parent
+  csv_path = BASE_DIR / "data" / "raw_papers.csv"
   if os.path.exists(csv_path):
     data = pd.read_csv(csv_path)
 
     column_map = {
         "No.": "publication_id",
         "Material": "material_name",
+        "Density Measurement Method": "density_method",
+        "Printed Geom.": "printed_geometry",
         "Laser Power (W)": "laser_power_w",
         "Scan Speed (mm/s)": "scan_speed_mm_s",
         "Hatch space (mm)": "hatch_distance_mm",
         "Layer thickness (mm)": "layer_thickness_mm",
+        "Spot size (mm)": "spot_size_mm",
+        "Geometric Factor": "geometric_factor",
+        "D50 μm": "d50_um",
+        "RD (%)": "relative_density_pct",
+        "Printer Model": "printer_model",
+        "DOI": "doi",
         "Energy density (J/mm³)": "ved_j_mm3",
         "Porosity in vol%": "porosity_pct",
         "Microhadness (HV)": "microhardness_hv",
-        "Spot size (mm)": "spot_size_mm",
-        "Hatch Angle(degree)": "hatch_angle_deg",
-        "Exposure time in µs": "exposure_time_us",
+        # "Hatch Angle(degree)": "hatch_angle_deg",
+        # "Exposure time in µs": "exposure_time_us",
     }
 
     data = data.rename(columns=column_map)
@@ -78,6 +88,21 @@ selected_material = st.sidebar.selectbox(
 filtered_df = df.copy()
 if selected_material != "All":
   filtered_df = filtered_df[filtered_df["material_name"] == selected_material]
+
+def parse_porosity_value(val):
+  # Extract leading numeric value from strings like "8.8±7.5" or return float
+  if pd.isna(val):
+    return None
+  if isinstance(val, (int, float)):
+    return float(val)
+  match = re.match(r"^\s*([+-]?\d+(?:\.\d+)?)", str(val))
+  return float(match.group(1)) if match else None
+
+
+plot_df = filtered_df.copy()
+plot_df["ved_j_mm3"] = pd.to_numeric(plot_df["ved_j_mm3"], errors="coerce")
+plot_df["porosity_num"] = plot_df["porosity_pct"].apply(parse_porosity_value)
+plot_df = plot_df.dropna(subset=["ved_j_mm3", "porosity_num"])
 
 # Section B: Process Parameter Simulator (ML Input)
 st.sidebar.subheader("2. Target Process Simulator")
@@ -211,11 +236,11 @@ with tab1:
   st.markdown("---")
 
   # Core Visualization: Literature Scatter Plot with Red Star Overlay for ML Prediction
-  if not filtered_df.empty:
+  if not plot_df.empty:
     fig = px.scatter(
-        filtered_df,
+        plot_df,
         x="ved_j_mm3",
-        y="porosity_pct",
+        y="porosity_num",
         color="material_name",
         hover_data=[
             "publication_id",
@@ -229,11 +254,12 @@ with tab1:
         ),
         labels={
             "ved_j_mm3": "Volume Energy Density (J/mm³)",
-            "porosity_pct": "Porosity (%)",
+            "porosity_num": "Porosity (%)",
             "material_name": "Alloy",
         },
     )
 
+   
     # Overlay user's simulated target as a prominent red star marker
     fig.add_scatter(
         x=[sim_ved],
@@ -259,20 +285,20 @@ with tab2:
       "Browse, filter, and inspect the raw experimental data points extracted"
       " from peer-reviewed publications."
   )
-  st.dataframe(filtered_df, use_container_width=True)
+  st.dataframe(plot_df, use_container_width=True)
 
 with tab3:
   st.subheader("Process Window Density Contours")
   st.markdown(
       "Global process parameter mapping across Laser Power and Scan Speed."
   )
-  if not filtered_df.empty and len(filtered_df) >= 3:
+  if not plot_df.empty and len(plot_df) >= 3:
     # 修复方案：改用 px.density_heatmap，它完美支持 color_continuous_scale
     fig_contour = px.density_heatmap(
-        filtered_df,
+        plot_df,
         x="laser_power_w",
         y="scan_speed_mm_s",
-        z="porosity_pct",
+        z="porosity_num",
         histfunc="avg",  # 对重叠区域取平均孔隙率
         color_continuous_scale="Viridis",
         title="Process Window (Power vs. Scan Speed vs. Porosity)",
