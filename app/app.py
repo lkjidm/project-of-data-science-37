@@ -375,3 +375,71 @@ with tab4:
     )
 
     st.plotly_chart(fig_box, use_container_width=True)
+
+
+    st.markdown("---")
+    st.markdown("### Porosity Data Coverage")
+
+    # Extract numeric porosity values, including values stored as "2.8 ± 1.2"
+    porosity_raw = df["porosity_pct"].astype(str)
+
+    porosity_numeric = pd.to_numeric(
+        porosity_raw.str.extract(r"^\s*([\d.]+)")[0],
+        errors="coerce"
+    )
+
+    coverage_df = df[["material_name"]].copy()
+    coverage_df["porosity_available"] = porosity_numeric.notna()
+
+    coverage = coverage_df.groupby("material_name")[
+        "porosity_available"
+    ].agg(["sum", "count"])
+
+    coverage["coverage_pct"] = (
+        coverage["sum"] / coverage["count"] * 100
+    ).round(1)
+
+    st.dataframe(
+        coverage.rename(columns={
+            "sum": "Usable porosity records",
+            "count": "Total records",
+            "coverage_pct": "Coverage (%)"
+        }),
+        use_container_width=True
+    )
+
+
+    st.markdown("---")
+    st.markdown("### Parameter Correlation Heatmap")
+
+    correlation_material = st.selectbox(
+        "Select material for correlation analysis",
+        options=["All"] + sorted(df["material_name"].dropna().unique().tolist()),
+        key="correlation_material"
+    )
+
+    if correlation_material == "All":
+        corr_data = comparison_df[comparison_columns]
+    else:
+        corr_data = comparison_df[
+            comparison_df["material_name"] == correlation_material
+        ][comparison_columns]
+
+    correlation_matrix = corr_data.corr()
+
+    fig_corr = px.imshow(
+        correlation_matrix,
+        text_auto=".2f",
+        color_continuous_scale="RdBu_r",
+        zmin=-1,
+        zmax=1,
+        title="Correlation Between Manufacturing Parameters"
+    )
+
+    fig_corr.update_layout(
+        height=650,
+        template="plotly_white"
+    )
+
+    st.plotly_chart(fig_corr, use_container_width=True)
+
